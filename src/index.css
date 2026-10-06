@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+:root {
+  --bg-stage: #090a0f;
+  --bg-card: #12141c;
+  --bg-card-hover: #1a1e2b;
+  --text-main: #f1f5f9;
+  --text-muted: #94a3b8;
+  --v1-color: #00e5ff;
+  --v2-color: #ffb300;
+  --both-color: #e040fb;
+  --chord-color: #38bdf8;
+  --comment-color: #64748b;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg-stage);
+  color: var(--text-main);
+  min-height: 100vh;
+  overflow-x: hidden;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom scrollbars for tablet/desktop */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #090a0f;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #272a38;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3e445b;
+}
+
+/* Monospace chord alignment */
+.font-chord {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+/* Smooth auto-scroll behavior */
+.stage-scroll-container {
+  scroll-behavior: auto;
+}
