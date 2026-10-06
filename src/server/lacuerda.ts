@@ -34,10 +34,7 @@ export async function searchLaCuerda(query: string): Promise<LaCuerdaSearchResul
   const html = await res.text();
   const results: LaCuerdaSearchResult[] = [];
 
-  // Parse table rows
-  const rowRegex = /<tr><td>\s*<a[^>]*href=['"]\/([^\/]+)\/['"][^>]*>([^<]+)<\/a><\/td><td><ul[^>]*>([\s\S]*?)<\/ul><\/td><\/tr>/gi;
-  
-  // Extract hds and fns arrays from page script if available
+  // Extract hds and fns arrays from page script
   const hdsMatch = html.match(/var hds=\[([\s\S]*?)\];/);
   const fnsMatch = html.match(/var fns=\[([\s\S]*?)\];/);
   const nmaxMatch = html.match(/var NMAX=(\d+);/);
@@ -52,15 +49,16 @@ export async function searchLaCuerda(query: string): Promise<LaCuerdaSearchResul
       fns = (0, eval)('[' + fnsMatch[1] + ']');
       nmax = parseInt(nmaxMatch[1], 10);
     } catch {
-      // fallback to regex
+      // fallback
     }
   }
 
-  let rowIndex = 0;
+  // Parse table rows
+  const rowRegex = /<tr><td>\s*<a[^>]*href=['"]\/([^\/]+)\/['"][^>]*>([^<]+)<\/a><\/td><td><ul[^>]*>([\s\S]*?)<\/ul><\/td><\/tr>/gi;
   let match: RegExpExecArray | null;
 
   while ((match = rowRegex.exec(html)) !== null) {
-    const artistSlug = (hds.length > 0 && nmax >= rowIndex && hds[nmax - rowIndex]) ? hds[nmax - rowIndex] : match[1];
+    const fallbackArtistSlug = match[1];
     const artistName = match[2].trim();
     const songsHtml = match[3];
 
@@ -68,18 +66,24 @@ export async function searchLaCuerda(query: string): Promise<LaCuerdaSearchResul
     let sMatch: RegExpExecArray | null;
 
     while ((sMatch = songRegex.exec(songsHtml)) !== null) {
+      const liId = sMatch[1]; // e.g. "r049"
       const lcd = sMatch[2]; // e.g. "TRTTBTKH-12345678"
       const songTitle = sMatch[3].trim();
 
-      // Number of versions available
-      const dashIdx = lcd.indexOf('-');
-      const versionsStr = dashIdx !== -1 ? lcd.substring(dashIdx + 1) : '1';
-      const versionsCount = versionsStr.length || 1;
+      // Extract numeric index n from liId ("r049" -> 49)
+      const numMatch = liId.match(/\d+/);
+      const n = numMatch ? parseInt(numMatch[0], 10) : 0;
 
-      // Calculate song slug from fns array or fallback
+      // In LaCuerda's arch.js: fn = '' + hds[NMAX - n] + '/' + fns[n]
+      let artistSlug = fallbackArtistSlug;
       let songSlug = '';
-      if (fns.length > 0 && nmax >= rowIndex) {
-        songSlug = fns[nmax - rowIndex];
+
+      if (hds.length > 0 && nmax >= n && hds[nmax - n]) {
+        artistSlug = hds[nmax - n];
+      }
+
+      if (fns.length > 0 && nmax >= n && fns[nmax - n]) {
+        songSlug = fns[nmax - n];
       }
 
       if (!songSlug) {
@@ -91,10 +95,15 @@ export async function searchLaCuerda(query: string): Promise<LaCuerdaSearchResul
           .replace(/^_+|_+$/g, '');
       }
 
+      // Count versions
+      const dashIdx = lcd.indexOf('-');
+      const versionsStr = dashIdx !== -1 ? lcd.substring(dashIdx + 1) : '1';
+      const versionsCount = versionsStr.length || 1;
+
       const canonicalUrl = `https://acordes.lacuerda.net/${artistSlug}/${songSlug}.shtml`;
 
       results.push({
-        id: `${artistSlug}-${songSlug}`,
+        id: `${artistSlug}-${songSlug}-${n}`,
         artist: artistName,
         artistSlug,
         title: songTitle,
@@ -104,8 +113,6 @@ export async function searchLaCuerda(query: string): Promise<LaCuerdaSearchResul
         versionsCount,
         url: canonicalUrl,
       });
-
-      rowIndex++;
     }
   }
 
@@ -113,13 +120,25 @@ export async function searchLaCuerda(query: string): Promise<LaCuerdaSearchResul
 }
 
 export function convertLaCuerdaHtmlToDuoChordPro(html: string): ConvertedLaCuerdaSong {
-  // Title and Artist
-  const titleMatch = html.match(/<div id=tH1><h1><a[^>]*>([^<]+)<\/a>/i);
-  const artistMatch = html.match(/<h2><a[^>]*>([^<]+)<\/a><\/h2>/i);
-  const title = titleMatch ? titleMatch[1].trim() : 'Sin Título';
-  const artist = artistMatch ? artistMatch[1].trim() : 'Artista Desconocido';
+  // Title and Artist extraction from metadata script variables first
+  const obandMatch = html.match(/oband=['"]([^'"]+)['"]/);
+  const orolaMatch = html.match(/orola=['"]([^'"]+)['"]/);
 
-  // Key hint from odes script variable (e.g. odes='G B7 Em C G D')
+  let title = orolaMatch ? orolaMatch[1].trim() : '';
+  let artist = obandMatch ? obandMatch[1].trim() : '';
+
+  // Fallbacks if not found in script variables
+  if (!title) {
+    const titleMatch = html.match(/<div id=tH1><h1><a[^>]*>([^<]+)<\/a>/i) || html.match(/<title>([^,:]+)[,:]/i);
+    title = titleMatch ? titleMatch[1].trim() : 'Canción LaCuerda';
+  }
+
+  if (!artist) {
+    const artistMatch = html.match(/<h2><a[^>]*>([^<]+)<\/a><\/h2>/i) || html.match(/<title>[^,:]+,\s*([^:]+):/i);
+    artist = artistMatch ? artistMatch[1].trim() : 'Artista';
+  }
+
+  // Key hint from odes script variable (e.g. odes='Em G D A')
   const odesMatch = html.match(/odes=['"]([^'"]+)['"]/);
   let keyHint = 'C';
   if (odesMatch) {
@@ -137,7 +156,7 @@ export function convertLaCuerdaHtmlToDuoChordPro(html: string): ConvertedLaCuerd
 
   let rawPre = preMatch[1];
 
-  // Remove useless HTML tags
+  // Remove <div></div> and stray HTML markers
   rawPre = rawPre.replace(/<div><\/div>/g, '');
 
   const lines = rawPre.split(/\r?\n/);
