@@ -1,5 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import type { Song, DuoConfig } from '../../types';
+import { LaCuerdaService } from '../../services/lacuerdaService';
+import type { LaCuerdaSearchResult } from '../../server/lacuerda';
 import { 
   Search, 
   Plus, 
@@ -9,7 +11,10 @@ import {
   Edit3, 
   Trash2, 
   SlidersHorizontal,
-  Download
+  Download,
+  Globe,
+  Sparkles,
+  Loader2
 } from 'lucide-react';
 
 interface SongLibraryProps {
@@ -20,6 +25,7 @@ interface SongLibraryProps {
   onCreateNewSong: () => void;
   onDeleteSong: (id: string) => void;
   onOpenDuoConfig: () => void;
+  onImportSong: (songData: Omit<Song, 'id'>) => Promise<Song>;
 }
 
 export const SongLibrary: React.FC<SongLibraryProps> = ({
@@ -30,19 +36,27 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({
   onCreateNewSong,
   onDeleteSong,
   onOpenDuoConfig,
+  onImportSong,
 }) => {
+  const [activeTab, setActiveTab] = useState<'local' | 'lacuerda'>('local');
   const [searchQuery, setSearchQuery] = useState('');
   const [keyFilter, setKeyFilter] = useState('ALL');
 
-  // Available keys in the library for quick filtering
+  // LaCuerda search state
+  const [isSearchingLaCuerda, setIsSearchingLaCuerda] = useState(false);
+  const [laCuerdaResults, setLaCuerdaResults] = useState<LaCuerdaSearchResult[]>([]);
+  const [laCuerdaError, setLaCuerdaError] = useState<string | null>(null);
+  const [importingUrl, setImportingUrl] = useState<string | null>(null);
+
+  // Available keys in local library
   const availableKeys = useMemo(() => {
     const set = new Set<string>();
     songs.forEach((s) => s.original_key && set.add(s.original_key));
     return Array.from(set).sort();
   }, [songs]);
 
-  // Filtered songs
-  const filteredSongs = useMemo(() => {
+  // Filtered local songs
+  const filteredLocalSongs = useMemo(() => {
     return songs.filter((song) => {
       const q = searchQuery.toLowerCase().trim();
       const matchesQuery =
@@ -56,6 +70,54 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({
       return matchesQuery && matchesKey;
     });
   }, [songs, searchQuery, keyFilter]);
+
+  // Handle search in LaCuerda
+  const handleSearchLaCuerda = async (customQuery?: string) => {
+    const q = (customQuery !== undefined ? customQuery : searchQuery).trim();
+    if (!q) return;
+
+    setActiveTab('lacuerda');
+    setIsSearchingLaCuerda(true);
+    setLaCuerdaError(null);
+
+    try {
+      const results = await LaCuerdaService.search(q);
+      setLaCuerdaResults(results);
+      if (results.length === 0) {
+        setLaCuerdaError(`No se encontraron canciones para "${q}" en LaCuerda.net`);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error al conectar con LaCuerda.net';
+      setLaCuerdaError(msg);
+      setLaCuerdaResults([]);
+    } finally {
+      setIsSearchingLaCuerda(false);
+    }
+  };
+
+  // 1-Click Import from LaCuerda
+  const handleImportAndOpen = async (result: LaCuerdaSearchResult) => {
+    setImportingUrl(result.url);
+    try {
+      const converted = await LaCuerdaService.importSong(result.url);
+      const savedSong = await onImportSong({
+        title: converted.title,
+        artist: converted.artist,
+        original_key: converted.original_key,
+        default_bpm: converted.default_bpm,
+        time_signature: converted.time_signature,
+        content_chordpro: converted.content_chordpro,
+      });
+
+      // Immediately open in stage view!
+      onSelectSong(savedSong);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error al importar la canción';
+      alert(`No se pudo importar: ${msg}`);
+    } finally {
+      setImportingUrl(null);
+    }
+  };
 
   // Export songs to JSON
   const handleExportJSON = () => {
@@ -81,13 +143,13 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({
                   <Guitar className="w-3.5 h-3.5" />
                   Dúo Vocal & Guitarra
                 </span>
-                <span className="text-xs text-slate-400">• Sistema de Atril de Alto Contraste</span>
+                <span className="text-xs text-slate-400">• Búsqueda Automática en LaCuerda.net</span>
               </div>
               <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
                 {duoConfig.duo_name}
               </h1>
               <p className="text-sm text-slate-400 mt-1 max-w-xl">
-                Repertorio sincronizado con Dublyobase. Visualización en tiempo real con diferenciación vocal cromática y transposición inmediata.
+                Repertorio propio en Dublyobase conectado a más de 100.000 canciones de LaCuerda con conversión instantánea a dos voces y transposición.
               </p>
             </div>
 
@@ -133,27 +195,101 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({
           </div>
         </div>
 
-        {/* Search, Filter & Actions Bar */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-          {/* Search Input */}
-          <div className="relative flex-1 max-w-md">
-            <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+        {/* Search Bar with Auto LaCuerda Trigger */}
+        <div className="bg-slate-900/90 border border-slate-800 p-3 sm:p-4 rounded-2xl shadow-xl flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Buscar por título, artista, acordes o letra..."
-              className="w-full bg-slate-900 border border-slate-800 rounded-2xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 transition-colors"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleSearchLaCuerda();
+                }
+              }}
+              placeholder="Escribe artista o canción (ej: De música ligera, Flaca, Rayando el sol)..."
+              className="w-full bg-slate-950 border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-sky-500"
             />
           </div>
 
-          {/* Key Filter & Actions */}
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Key Filter */}
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Search in LaCuerda Button */}
+            <button
+              onClick={() => handleSearchLaCuerda()}
+              disabled={isSearchingLaCuerda || !searchQuery.trim()}
+              className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 disabled:pointer-events-none text-slate-950 font-bold text-xs flex items-center gap-2 shadow-lg shadow-amber-500/20 active:scale-95 transition-all"
+              title="Buscar automáticamente en la base de datos de LaCuerda.net"
+            >
+              {isSearchingLaCuerda ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Globe className="w-4 h-4" />
+              )}
+              <span>Buscar en LaCuerda.net</span>
+            </button>
+
+            {/* New Manual Song */}
+            <button
+              onClick={onCreateNewSong}
+              className="px-4 py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-sky-500/20 active:scale-95 transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              <span className="hidden sm:inline">Crear Manual</span>
+            </button>
+
+            {/* Export JSON */}
+            <button
+              onClick={handleExportJSON}
+              className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+              title="Exportar copia de seguridad de tu repertorio en JSON"
+            >
+              <Download className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Tab Selector: Mi Repertorio vs LaCuerda.net */}
+        <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setActiveTab('local')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+                activeTab === 'local'
+                  ? 'bg-sky-500/20 text-sky-400 border border-sky-500/40 shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Music2 className="w-4 h-4" />
+              <span>Mi Repertorio Guardado ({filteredLocalSongs.length})</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setActiveTab('lacuerda');
+                if (laCuerdaResults.length === 0 && searchQuery.trim()) {
+                  handleSearchLaCuerda();
+                }
+              }}
+              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+                activeTab === 'lacuerda'
+                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Globe className="w-4 h-4" />
+              <span>Resultados LaCuerda.net {laCuerdaResults.length > 0 && `(${laCuerdaResults.length})`}</span>
+              {laCuerdaResults.length > 0 && (
+                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+              )}
+            </button>
+          </div>
+
+          {activeTab === 'local' && (
             <select
               value={keyFilter}
               onChange={(e) => setKeyFilter(e.target.value)}
-              className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono font-semibold text-sky-400 focus:outline-none focus:border-sky-500"
+              className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs font-mono font-semibold text-sky-400 focus:outline-none"
             >
               <option value="ALL">Todos los Tonos</option>
               {availableKeys.map((k) => (
@@ -162,96 +298,177 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({
                 </option>
               ))}
             </select>
-
-            {/* Export JSON */}
-            <button
-              onClick={handleExportJSON}
-              className="p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-white transition-colors"
-              title="Exportar copia de seguridad en JSON"
-            >
-              <Download className="w-4 h-4" />
-            </button>
-
-            {/* New Song Button */}
-            <button
-              onClick={onCreateNewSong}
-              className="px-4 py-2.5 rounded-2xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs flex items-center gap-2 shadow-lg shadow-sky-500/25 active:scale-95 transition-all"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Añadir Canción</span>
-            </button>
-          </div>
+          )}
         </div>
 
-        {/* Songs Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredSongs.map((song) => {
-            return (
-              <div
-                key={song.id}
-                className="bg-slate-900/80 border border-slate-800/90 rounded-2xl p-5 hover:border-slate-700/80 transition-all flex flex-col justify-between group shadow-lg hover:shadow-xl hover:shadow-sky-500/5"
-              >
-                <div>
-                  <div className="flex items-start justify-between gap-3 mb-2">
-                    <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-lg bg-slate-950 text-sky-400 border border-slate-800">
-                      {song.original_key || 'C'}
-                    </span>
-                    <span className="text-[11px] font-mono text-slate-500">
-                      {song.default_bpm} BPM
-                    </span>
+        {/* TAB 1: MI REPERTORIO LOCAL (DUBLYOBASE) */}
+        {activeTab === 'local' && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredLocalSongs.map((song) => (
+                <div
+                  key={song.id}
+                  className="bg-slate-900/80 border border-slate-800/90 rounded-2xl p-5 hover:border-slate-700/80 transition-all flex flex-col justify-between group shadow-lg hover:shadow-xl hover:shadow-sky-500/5"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-3 mb-2">
+                      <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-lg bg-slate-950 text-sky-400 border border-slate-800">
+                        {song.original_key || 'C'}
+                      </span>
+                      <span className="text-[11px] font-mono text-slate-500">
+                        {song.default_bpm} BPM
+                      </span>
+                    </div>
+
+                    <h3
+                      onClick={() => onSelectSong(song)}
+                      className="font-bold text-base text-white hover:text-sky-300 cursor-pointer truncate transition-colors"
+                    >
+                      {song.title}
+                    </h3>
+                    <p className="text-xs text-slate-400 truncate mb-4">{song.artist}</p>
                   </div>
 
-                  <h3
-                    onClick={() => onSelectSong(song)}
-                    className="font-bold text-base text-white hover:text-sky-300 cursor-pointer truncate transition-colors"
+                  <div className="pt-4 border-t border-slate-800/80 flex items-center justify-between">
+                    <button
+                      onClick={() => onSelectSong(song)}
+                      className="px-4 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500 text-emerald-400 hover:text-slate-950 font-bold text-xs flex items-center gap-2 transition-all active:scale-95"
+                    >
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                      <span>Ver en Atril</span>
+                    </button>
+
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => onEditSong(song)}
+                        className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                        title="Editar letra y acordes"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          if (confirm(`¿Eliminar "${song.title}" del repertorio?`)) {
+                            onDeleteSong(song.id);
+                          }
+                        }}
+                        className="p-2 rounded-xl text-slate-500 hover:text-red-400 hover:bg-red-950/20 transition-colors"
+                        title="Eliminar canción"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {filteredLocalSongs.length === 0 && (
+              <div className="text-center py-16 bg-slate-900/40 border border-dashed border-slate-800 rounded-3xl p-8">
+                <Music2 className="w-12 h-12 mx-auto mb-3 text-slate-600" />
+                <h4 className="text-base font-bold text-white mb-1">
+                  {searchQuery ? `No tienes "${searchQuery}" en tu repertorio propio` : 'Tu repertorio está vacío'}
+                </h4>
+                <p className="text-xs text-slate-400 max-w-md mx-auto mb-4">
+                  ¡Puedes buscarla en LaCuerda.net con un solo clic y traerla con sus acordes y asignación vocal!
+                </p>
+                {searchQuery.trim() && (
+                  <button
+                    onClick={() => handleSearchLaCuerda()}
+                    className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs inline-flex items-center gap-2 shadow-lg shadow-amber-500/20"
                   >
-                    {song.title}
-                  </h3>
-                  <p className="text-xs text-slate-400 truncate mb-4">{song.artist}</p>
+                    <Globe className="w-4 h-4" />
+                    <span>Buscar "{searchQuery}" en LaCuerda.net</span>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB 2: RESULTADOS EN VIVO DE LACUERDA.NET */}
+        {activeTab === 'lacuerda' && (
+          <div className="space-y-4">
+            {isSearchingLaCuerda && (
+              <div className="py-20 text-center space-y-3">
+                <Loader2 className="w-10 h-10 mx-auto text-amber-400 animate-spin" />
+                <p className="text-sm font-bold text-white">Consultando LaCuerda.net en tiempo real...</p>
+                <p className="text-xs text-slate-400">Extrayendo artistas y versiones más populares</p>
+              </div>
+            )}
+
+            {laCuerdaError && !isSearchingLaCuerda && (
+              <div className="p-6 bg-red-950/30 border border-red-800/60 rounded-2xl text-center space-y-2">
+                <p className="text-sm font-semibold text-red-300">{laCuerdaError}</p>
+                <p className="text-xs text-slate-400">Intenta buscar por el nombre de la canción o el artista.</p>
+              </div>
+            )}
+
+            {!isSearchingLaCuerda && laCuerdaResults.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-xs text-slate-400 px-1">
+                  <span>
+                    Se encontraron <strong className="text-amber-400">{laCuerdaResults.length}</strong> resultados en LaCuerda.net
+                  </span>
+                  <span className="text-[11px] text-slate-500">
+                    Pulsa "⚡ Importar y Abrir" para convertir a dos voces y guardar en tu atril
+                  </span>
                 </div>
 
-                <div className="pt-4 border-t border-slate-800/80 flex items-center justify-between">
-                  {/* Open in Stage Mode Button */}
-                  <button
-                    onClick={() => onSelectSong(song)}
-                    className="px-4 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500 text-emerald-400 hover:text-slate-950 font-bold text-xs flex items-center gap-2 transition-all active:scale-95"
-                  >
-                    <Play className="w-3.5 h-3.5 fill-current" />
-                    <span>Ver en Atril</span>
-                  </button>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {laCuerdaResults.map((result) => {
+                    const isImportingThis = importingUrl === result.url;
 
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => onEditSong(song)}
-                      className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-                      title="Editar letra y acordes"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </button>
+                    return (
+                      <div
+                        key={result.id}
+                        className="bg-slate-900/90 border border-slate-800 hover:border-amber-500/50 rounded-2xl p-5 flex flex-col justify-between shadow-xl transition-all group"
+                      >
+                        <div>
+                          {/* Rating & Versions badge */}
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                              <Sparkles className="w-3 h-3 text-amber-400" />
+                              {result.ratingLabel}
+                            </span>
+                            <span className="text-[10px] font-mono text-slate-400">
+                              {result.versionsCount} ver.
+                            </span>
+                          </div>
 
-                    <button
-                      onClick={() => {
-                        if (confirm(`¿Eliminar "${song.title}" del repertorio?`)) {
-                          onDeleteSong(song.id);
-                        }
-                      }}
-                      className="p-2 rounded-xl text-slate-500 hover:text-red-400 hover:bg-red-950/20 transition-colors"
-                      title="Eliminar canción"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+                          <h4 className="font-extrabold text-base text-white group-hover:text-amber-300 transition-colors truncate">
+                            {result.title}
+                          </h4>
+                          <p className="text-xs text-slate-400 truncate mb-4">{result.artist}</p>
+                        </div>
+
+                        <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between">
+                          <button
+                            onClick={() => handleImportAndOpen(result)}
+                            disabled={isImportingThis}
+                            className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/25 active:scale-95 transition-all"
+                            title="Descargar acordes, convertir a formato dúo y guardar en Dublyobase"
+                          >
+                            {isImportingThis ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                <span>Convirtiendo a Dúo...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="w-4 h-4 fill-current" />
+                                <span>⚡ Importar y Abrir en Atril</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
-            );
-          })}
-        </div>
-
-        {filteredSongs.length === 0 && (
-          <div className="text-center py-20 text-slate-500">
-            <Music2 className="w-12 h-12 mx-auto mb-3 opacity-30" />
-            <p className="text-base font-semibold text-slate-400">No se encontraron canciones</p>
-            <p className="text-xs text-slate-500 mt-1">Prueba con otro término de búsqueda o crea una nueva canción.</p>
+            )}
           </div>
         )}
       </div>

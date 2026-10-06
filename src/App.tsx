@@ -103,12 +103,13 @@ export function App() {
     setView('editor');
   };
 
-  const handleSaveSong = async (songData: Omit<Song, 'id'> & { id?: string }) => {
+  const handleSaveSong = async (songData: Omit<Song, 'id'> & { id?: string }): Promise<Song> => {
     const saved = await DataService.saveSong(songData);
     const updatedSongs = await DataService.getSongs();
     setSongs(updatedSongs);
     setSelectedSong(saved);
     setView('stage');
+    return saved;
   };
 
   const handleDeleteSong = async (id: string) => {
@@ -249,6 +250,7 @@ export function App() {
           onCreateNewSong={handleCreateNewSong}
           onDeleteSong={handleDeleteSong}
           onOpenDuoConfig={() => setIsDuoConfigOpen(true)}
+          onImportSong={handleSaveSong}
         />
       )}
 
