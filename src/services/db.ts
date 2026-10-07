@@ -1,7 +1,7 @@
 import type { DuoConfig, Setlist, Song } from '../types';
 
 const INITIAL_DUO_CONFIG: DuoConfig = {
-  id: '22cf1e8c-7d90-4ecf-aba2-9c77f275202a',
+  id: '33c79b50-b810-4d66-82db-da3787ebc8a7',
   duo_name: 'Dúo Armonía',
   singer_1_name: 'Voz 1 (Alex)',
   singer_1_color: '#00E5FF', // Neon Cyan
@@ -19,7 +19,7 @@ const INITIAL_DUO_CONFIG: DuoConfig = {
 
 const SEED_SONGS: Song[] = [
   {
-    id: '07a4fb2e-562b-43f7-b273-536fd63a07b9',
+    id: '734c9ef1-9fa3-4a24-8c3c-1c2c6db61101',
     title: 'Shallow',
     artist: 'Lady Gaga & Bradley Cooper',
     original_key: 'Em',
@@ -71,7 +71,7 @@ const SEED_SONGS: Song[] = [
 `,
   },
   {
-    id: '62602478-a715-494b-abf3-7532552f9da6',
+    id: '48b6de9c-6f61-45e0-8ebd-896e1b3ab9c8',
     title: 'Falling Slowly',
     artist: 'Glen Hansard & Markéta Irglová',
     original_key: 'C',
@@ -120,7 +120,7 @@ We've still got [F]time
 `,
   },
   {
-    id: '77714bf4-1541-4fac-92b7-470def2312f1',
+    id: 'c1e1b8df-7457-4221-90e4-642381c8b3a2',
     title: 'City of Stars',
     artist: 'Ryan Gosling & Emma Stone',
     original_key: 'Gm',
@@ -176,31 +176,31 @@ A [Gm]rat-tat-tat on my [A7]heart...
 
 const SEED_SETLISTS: Setlist[] = [
   {
-    id: '6844f47e-48e1-434b-98d3-5e699a89af0c',
+    id: '1bf96849-3b5d-4d96-a9cd-c59cd7bf8f50',
     title: 'Setlist Acústico - Show en Vivo',
     description: 'Repertorio de prueba para dúo vocal y guitarras con armonías',
     event_date: '2026-10-15',
     is_active: true,
     items: [
       {
-        id: 'a9bf680b-bdfb-4197-8bd4-926c29651f12',
-        setlist_id: '6844f47e-48e1-434b-98d3-5e699a89af0c',
-        song_id: '62602478-a715-494b-abf3-7532552f9da6',
+        id: '428201fb-b25e-4643-ba10-8259721f15bf',
+        setlist_id: '1bf96849-3b5d-4d96-a9cd-c59cd7bf8f50',
+        song_id: '48b6de9c-6f61-45e0-8ebd-896e1b3ab9c8',
         position: 1,
         cue_notes: 'Arpegio suave, Voz 1 empieza con guitarra',
       },
       {
-        id: '211eb2ad-9041-4e50-8010-10525e13a790',
-        setlist_id: '6844f47e-48e1-434b-98d3-5e699a89af0c',
-        song_id: '77714bf4-1541-4fac-92b7-470def2312f1',
+        id: '220f7f4e-9ed5-4615-ba49-4568a93ed4b2',
+        setlist_id: '1bf96849-3b5d-4d96-a9cd-c59cd7bf8f50',
+        song_id: 'c1e1b8df-7457-4221-90e4-642381c8b3a2',
         position: 2,
         override_capo: 3,
         cue_notes: 'Capo traste 3, ritmo swing acústico',
       },
       {
-        id: '7238954b-9675-44bf-99dd-9acf93ce362f',
-        setlist_id: '6844f47e-48e1-434b-98d3-5e699a89af0c',
-        song_id: '07a4fb2e-562b-43f7-b273-536fd63a07b9',
+        id: '1b6de866-3563-41fd-b1b6-6b26d3b34528',
+        setlist_id: '1bf96849-3b5d-4d96-a9cd-c59cd7bf8f50',
+        song_id: '734c9ef1-9fa3-4a24-8c3c-1c2c6db61101',
         position: 3,
         cue_notes: 'Clímax vocal en coro juntos, solo acústico intermedio',
       },
@@ -235,8 +235,22 @@ export class DataService {
 
   // --- SONGS ---
   static async getSongs(): Promise<Song[]> {
-    const songs = this.load<Song[]>(STORAGE_KEYS.SONGS, SEED_SONGS);
-    return songs;
+    // 1. Try fetching from Dublyobase API
+    try {
+      const res = await fetch('/api/db/songs');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.songs) && data.songs.length > 0) {
+          this.save(STORAGE_KEYS.SONGS, data.songs);
+          return data.songs;
+        }
+      }
+    } catch {
+      // Offline fallback
+    }
+
+    // 2. Fallback to localStorage or SEED_SONGS
+    return this.load<Song[]>(STORAGE_KEYS.SONGS, SEED_SONGS);
   }
 
   static async getSongById(id: string): Promise<Song | null> {
@@ -247,42 +261,83 @@ export class DataService {
   static async saveSong(song: Omit<Song, 'id'> & { id?: string }): Promise<Song> {
     const songs = await this.getSongs();
     const now = new Date().toISOString();
+    let savedSong: Song;
     
     if (song.id) {
       const index = songs.findIndex((s) => s.id === song.id);
       if (index !== -1) {
-        const updated: Song = {
+        savedSong = {
           ...songs[index],
           ...song,
           id: song.id,
           updated: now,
         };
-        songs[index] = updated;
-        this.save(STORAGE_KEYS.SONGS, songs);
-        return updated;
+        songs[index] = savedSong;
+      } else {
+        savedSong = {
+          ...song,
+          id: song.id,
+          created: now,
+          updated: now,
+        };
+        songs.unshift(savedSong);
       }
+    } else {
+      savedSong = {
+        ...song,
+        id: crypto.randomUUID(),
+        created: now,
+        updated: now,
+      };
+      songs.unshift(savedSong);
     }
 
-    const newSong: Song = {
-      ...song,
-      id: song.id || crypto.randomUUID(),
-      created: now,
-      updated: now,
-    };
-    songs.unshift(newSong);
+    // Save locally
     this.save(STORAGE_KEYS.SONGS, songs);
-    return newSong;
+
+    // Sync to Dublyobase
+    try {
+      fetch('/api/db/songs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(savedSong),
+      }).catch((e) => console.warn('Dublyobase sync background error:', e));
+    } catch {
+      // offline
+    }
+
+    return savedSong;
   }
 
   static async deleteSong(id: string): Promise<boolean> {
     const songs = await this.getSongs();
     const filtered = songs.filter((s) => s.id !== id);
     this.save(STORAGE_KEYS.SONGS, filtered);
+
+    try {
+      fetch(`/api/db/songs/${id}`, { method: 'DELETE' }).catch(() => {});
+    } catch {
+      // offline
+    }
+
     return true;
   }
 
   // --- DUO CONFIG ---
   static async getDuoConfig(): Promise<DuoConfig> {
+    try {
+      const res = await fetch('/api/db/config');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.config && data.config.id) {
+          this.save(STORAGE_KEYS.CONFIG, data.config);
+          return data.config;
+        }
+      }
+    } catch {
+      // Offline fallback
+    }
+
     return this.load<DuoConfig>(STORAGE_KEYS.CONFIG, INITIAL_DUO_CONFIG);
   }
 
@@ -290,15 +345,37 @@ export class DataService {
     const current = await this.getDuoConfig();
     const updated = { ...current, ...patch };
     this.save(STORAGE_KEYS.CONFIG, updated);
+
+    try {
+      fetch('/api/db/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated),
+      }).catch(() => {});
+    } catch {
+      // offline
+    }
+
     return updated;
   }
 
   // --- SETLISTS ---
   static async getSetlists(): Promise<Setlist[]> {
-    const setlists = this.load<Setlist[]>(STORAGE_KEYS.SETLISTS, SEED_SETLISTS);
+    let setlists = this.load<Setlist[]>(STORAGE_KEYS.SETLISTS, SEED_SETLISTS);
+    try {
+      const res = await fetch('/api/db/setlists');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.setlists) && data.setlists.length > 0) {
+          setlists = data.setlists;
+          this.save(STORAGE_KEYS.SETLISTS, setlists);
+        }
+      }
+    } catch {
+      // offline
+    }
+
     const songs = await this.getSongs();
-    
-    // Attach song references
     return setlists.map((setlist) => ({
       ...setlist,
       items: (setlist.items || []).map((item) => ({

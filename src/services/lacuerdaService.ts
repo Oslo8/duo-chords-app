@@ -1,8 +1,8 @@
-import type { LaCuerdaSearchResult, ConvertedLaCuerdaSong } from '../server/lacuerda';
+import type { LaCuerdaSearchResponse, ConvertedLaCuerdaSong } from '../server/lacuerda';
 
 export class LaCuerdaService {
-  static async search(query: string): Promise<LaCuerdaSearchResult[]> {
-    if (!query.trim()) return [];
+  static async search(query: string): Promise<LaCuerdaSearchResponse> {
+    if (!query.trim()) return { results: [] };
 
     const res = await fetch(`/api/lacuerda/search?q=${encodeURIComponent(query.trim())}`);
     if (!res.ok) {
@@ -11,7 +11,10 @@ export class LaCuerdaService {
     }
 
     const data = await res.json();
-    return data.results || [];
+    return {
+      detectedArtist: data.detectedArtist,
+      results: data.results || [],
+    };
   }
 
   static async importSong(songUrl: string): Promise<ConvertedLaCuerdaSong> {

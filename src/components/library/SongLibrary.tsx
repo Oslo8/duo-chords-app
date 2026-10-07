@@ -1,20 +1,21 @@
 import React, { useState, useMemo } from 'react';
 import type { Song, DuoConfig } from '../../types';
-import { LaCuerdaService } from '../../services/lacuerdaService';
 import type { LaCuerdaSearchResult } from '../../server/lacuerda';
-import { 
-  Search, 
-  Plus, 
-  Music2, 
-  Guitar, 
-  Play, 
-  Edit3, 
-  Trash2, 
+import { LaCuerdaService } from '../../services/lacuerdaService';
+import {
+  Music2,
+  Search,
+  Plus,
+  Play,
+  Edit3,
+  Trash2,
+  Globe,
   SlidersHorizontal,
   Download,
-  Globe,
   Sparkles,
-  Loader2
+  Loader2,
+  Guitar,
+  Flame,
 } from 'lucide-react';
 
 interface SongLibraryProps {
@@ -45,6 +46,7 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({
   // LaCuerda search state
   const [isSearchingLaCuerda, setIsSearchingLaCuerda] = useState(false);
   const [laCuerdaResults, setLaCuerdaResults] = useState<LaCuerdaSearchResult[]>([]);
+  const [detectedArtist, setDetectedArtist] = useState<string | null>(null);
   const [laCuerdaError, setLaCuerdaError] = useState<string | null>(null);
   const [importingUrl, setImportingUrl] = useState<string | null>(null);
 
@@ -79,17 +81,21 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({
     setActiveTab('lacuerda');
     setIsSearchingLaCuerda(true);
     setLaCuerdaError(null);
+    setDetectedArtist(null);
 
     try {
-      const results = await LaCuerdaService.search(q);
-      setLaCuerdaResults(results);
-      if (results.length === 0) {
-        setLaCuerdaError(`No se encontraron canciones para "${q}" en LaCuerda.net`);
+      const res = await LaCuerdaService.search(q);
+      setLaCuerdaResults(res.results);
+      setDetectedArtist(res.detectedArtist || null);
+
+      if (res.results.length === 0) {
+        setLaCuerdaError(`No se encontraron canciones ni artistas para "${q}" en LaCuerda.net`);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error al conectar con LaCuerda.net';
       setLaCuerdaError(msg);
       setLaCuerdaResults([]);
+      setDetectedArtist(null);
     } finally {
       setIsSearchingLaCuerda(false);
     }
@@ -97,6 +103,7 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({
 
   // 1-Click Import from LaCuerda
   const handleImportAndOpen = async (result: LaCuerdaSearchResult) => {
+    if (importingUrl) return;
     setImportingUrl(result.url);
     try {
       const converted = await LaCuerdaService.importSong(result.url);
@@ -143,13 +150,13 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({
                   <Guitar className="w-3.5 h-3.5" />
                   Dúo Vocal & Guitarra
                 </span>
-                <span className="text-xs text-slate-400">• Búsqueda Automática en LaCuerda.net</span>
+                <span className="text-xs text-slate-400">• Búsqueda Inteligente de Artistas y Canciones</span>
               </div>
               <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
                 {duoConfig.duo_name}
               </h1>
               <p className="text-sm text-slate-400 mt-1 max-w-xl">
-                Repertorio propio en Dublyobase conectado a más de 100.000 canciones de LaCuerda con conversión instantánea a dos voces y transposición.
+                Repertorio en vivo con detección automática de bandas, artistas y canciones en LaCuerda.net, conversión instantánea a dos voces y transposición.
               </p>
             </div>
 
@@ -208,7 +215,7 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({
                   handleSearchLaCuerda();
                 }
               }}
-              placeholder="Escribe artista o canción (ej: De música ligera, Flaca, Rayando el sol)..."
+              placeholder="Escribe banda, artista o canción (ej: Morat, Bad Bunny, Soda Stereo, Flaca)..."
               className="w-full bg-slate-950 border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-sky-500"
             />
           </div>
@@ -261,7 +268,7 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({
               }`}
             >
               <Music2 className="w-4 h-4" />
-              <span>Mi Repertorio Guardado ({filteredLocalSongs.length})</span>
+              <span>Mi Repertorio ({filteredLocalSongs.length})</span>
             </button>
 
             <button
@@ -278,7 +285,9 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({
               }`}
             >
               <Globe className="w-4 h-4" />
-              <span>Resultados LaCuerda.net {laCuerdaResults.length > 0 && `(${laCuerdaResults.length})`}</span>
+              <span>
+                {detectedArtist ? `Canciones de ${detectedArtist}` : 'LaCuerda.net'} {laCuerdaResults.length > 0 && `(${laCuerdaResults.length})`}
+              </span>
               {laCuerdaResults.length > 0 && (
                 <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
               )}
@@ -308,7 +317,8 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({
               {filteredLocalSongs.map((song) => (
                 <div
                   key={song.id}
-                  className="bg-slate-900/80 border border-slate-800/90 rounded-2xl p-5 hover:border-slate-700/80 transition-all flex flex-col justify-between group shadow-lg hover:shadow-xl hover:shadow-sky-500/5"
+                  onClick={() => onSelectSong(song)}
+                  className="bg-slate-900/80 border border-slate-800/90 hover:border-sky-500/60 rounded-2xl p-5 cursor-pointer transition-all flex flex-col justify-between group shadow-lg hover:shadow-xl hover:shadow-sky-500/10 active:scale-[0.99]"
                 >
                   <div>
                     <div className="flex items-start justify-between gap-3 mb-2">
@@ -320,10 +330,7 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({
                       </span>
                     </div>
 
-                    <h3
-                      onClick={() => onSelectSong(song)}
-                      className="font-bold text-base text-white hover:text-sky-300 cursor-pointer truncate transition-colors"
-                    >
+                    <h3 className="font-bold text-base text-white group-hover:text-sky-300 truncate transition-colors">
                       {song.title}
                     </h3>
                     <p className="text-xs text-slate-400 truncate mb-4">{song.artist}</p>
@@ -331,8 +338,11 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({
 
                   <div className="pt-4 border-t border-slate-800/80 flex items-center justify-between">
                     <button
-                      onClick={() => onSelectSong(song)}
-                      className="px-4 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500 text-emerald-400 hover:text-slate-950 font-bold text-xs flex items-center gap-2 transition-all active:scale-95"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelectSong(song);
+                      }}
+                      className="px-4 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500 text-emerald-400 hover:text-slate-950 font-bold text-xs flex items-center gap-2 transition-all active:scale-95 shadow-sm"
                     >
                       <Play className="w-3.5 h-3.5 fill-current" />
                       <span>Ver en Atril</span>
@@ -340,7 +350,10 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({
 
                     <div className="flex items-center gap-1">
                       <button
-                        onClick={() => onEditSong(song)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onEditSong(song);
+                        }}
                         className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
                         title="Editar letra y acordes"
                       >
@@ -348,7 +361,8 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({
                       </button>
 
                       <button
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           if (confirm(`¿Eliminar "${song.title}" del repertorio?`)) {
                             onDeleteSong(song.id);
                           }
@@ -368,15 +382,15 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({
               <div className="text-center py-16 bg-slate-900/40 border border-dashed border-slate-800 rounded-3xl p-8">
                 <Music2 className="w-12 h-12 mx-auto mb-3 text-slate-600" />
                 <h4 className="text-base font-bold text-white mb-1">
-                  {searchQuery ? `No tienes "${searchQuery}" en tu repertorio propio` : 'Tu repertorio está vacío'}
+                  {searchQuery ? `No tienes "${searchQuery}" en tu repertorio guardado` : 'Tu repertorio está vacío'}
                 </h4>
                 <p className="text-xs text-slate-400 max-w-md mx-auto mb-4">
-                  ¡Puedes buscarla en LaCuerda.net con un solo clic y traerla con sus acordes y asignación vocal!
+                  ¡Puedes buscar a la banda o canción en LaCuerda.net con un solo clic y traerla inmediatamente con sus acordes y asignación vocal!
                 </p>
                 {searchQuery.trim() && (
                   <button
                     onClick={() => handleSearchLaCuerda()}
-                    className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs inline-flex items-center gap-2 shadow-lg shadow-amber-500/20"
+                    className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs inline-flex items-center gap-2 shadow-lg shadow-amber-500/20 active:scale-95"
                   >
                     <Globe className="w-4 h-4" />
                     <span>Buscar "{searchQuery}" en LaCuerda.net</span>
@@ -394,25 +408,49 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({
               <div className="py-20 text-center space-y-3">
                 <Loader2 className="w-10 h-10 mx-auto text-amber-400 animate-spin" />
                 <p className="text-sm font-bold text-white">Consultando LaCuerda.net en tiempo real...</p>
-                <p className="text-xs text-slate-400">Extrayendo artistas y versiones más populares</p>
+                <p className="text-xs text-slate-400">Analizando si es una banda, artista o canción y extrayendo los hits principales</p>
               </div>
             )}
 
             {laCuerdaError && !isSearchingLaCuerda && (
               <div className="p-6 bg-red-950/30 border border-red-800/60 rounded-2xl text-center space-y-2">
                 <p className="text-sm font-semibold text-red-300">{laCuerdaError}</p>
-                <p className="text-xs text-slate-400">Intenta buscar por el nombre de la canción o el artista.</p>
+                <p className="text-xs text-slate-400">Prueba escribiendo el nombre de la banda (ej: Morat) o de una canción (ej: De música ligera).</p>
               </div>
             )}
 
             {!isSearchingLaCuerda && laCuerdaResults.length > 0 && (
-              <div className="space-y-3">
+              <div className="space-y-4">
+                {/* Detected Artist Banner */}
+                {detectedArtist && (
+                  <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-slate-900 to-indigo-950/40 border border-amber-500/40 flex items-center justify-between gap-4 shadow-xl">
+                    <div className="flex items-center gap-3.5">
+                      <div className="w-11 h-11 rounded-2xl bg-amber-500 text-slate-950 font-black flex items-center justify-center shrink-0 shadow-lg shadow-amber-500/20 text-xl">
+                        🎤
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30">
+                            Banda / Artista Detectado
+                          </span>
+                          <span className="text-xs text-slate-400">• {laCuerdaResults.length} canciones disponibles</span>
+                        </div>
+                        <h3 className="text-lg font-black text-white tracking-tight">{detectedArtist}</h3>
+                      </div>
+                    </div>
+                    <div className="hidden sm:flex items-center gap-1.5 text-xs text-amber-300 bg-amber-500/10 px-3 py-1.5 rounded-xl border border-amber-500/20">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Hits más populares ordenados primero</span>
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between text-xs text-slate-400 px-1">
                   <span>
-                    Se encontraron <strong className="text-amber-400">{laCuerdaResults.length}</strong> resultados en LaCuerda.net
+                    Se encontraron <strong className="text-amber-400">{laCuerdaResults.length}</strong> canciones en LaCuerda.net
                   </span>
-                  <span className="text-[11px] text-slate-500">
-                    Pulsa "⚡ Importar y Abrir" para convertir a dos voces y guardar en tu atril
+                  <span className="text-[11px] text-slate-500 hidden sm:inline">
+                    Haz clic en cualquier tarjeta para abrirla directamente en el atril
                   </span>
                 </div>
 
@@ -423,15 +461,27 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({
                     return (
                       <div
                         key={result.id}
-                        className="bg-slate-900/90 border border-slate-800 hover:border-amber-500/50 rounded-2xl p-5 flex flex-col justify-between shadow-xl transition-all group"
+                        onClick={() => !isImportingThis && handleImportAndOpen(result)}
+                        className={`bg-slate-900/90 border rounded-2xl p-5 flex flex-col justify-between shadow-xl cursor-pointer transition-all group active:scale-[0.99] ${
+                          result.isPopularHit
+                            ? 'border-amber-500/40 hover:border-amber-400 hover:shadow-amber-500/10 bg-gradient-to-b from-amber-500/5 to-slate-900/90'
+                            : 'border-slate-800 hover:border-amber-500/50 hover:shadow-amber-500/5'
+                        }`}
                       >
                         <div>
                           {/* Rating & Versions badge */}
                           <div className="flex items-center justify-between gap-2 mb-2">
-                            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
-                              <Sparkles className="w-3 h-3 text-amber-400" />
-                              {result.ratingLabel}
-                            </span>
+                            {result.isPopularHit ? (
+                              <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500/30 to-rose-500/30 text-amber-300 border border-amber-500/40 flex items-center gap-1 shadow-sm">
+                                <Flame className="w-3 h-3 text-amber-400 fill-amber-400" />
+                                Hit Más Popular
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                                <Sparkles className="w-3 h-3 text-amber-400" />
+                                {result.ratingLabel}
+                              </span>
+                            )}
                             <span className="text-[10px] font-mono text-slate-400">
                               {result.versionsCount} ver.
                             </span>
@@ -445,20 +495,23 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({
 
                         <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between">
                           <button
-                            onClick={() => handleImportAndOpen(result)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleImportAndOpen(result);
+                            }}
                             disabled={isImportingThis}
                             className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/25 active:scale-95 transition-all"
-                            title="Descargar acordes, convertir a formato dúo y guardar en Dublyobase"
+                            title="Descargar acordes, convertir a formato dúo y guardar en tu atril"
                           >
                             {isImportingThis ? (
                               <>
                                 <Loader2 className="w-4 h-4 animate-spin" />
-                                <span>Convirtiendo a Dúo...</span>
+                                <span>Convirtiendo a Dúo y Abriendo...</span>
                               </>
                             ) : (
                               <>
                                 <Sparkles className="w-4 h-4 fill-current" />
-                                <span>⚡ Importar y Abrir en Atril</span>
+                                <span>⚡ Abrir en Atril (Dúo)</span>
                               </>
                             )}
                           </button>
@@ -475,3 +528,5 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({
     </div>
   );
 };
+
+export default SongLibrary;
